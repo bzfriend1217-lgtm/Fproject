@@ -28,3 +28,6 @@ Thumbs.db
 
 # Java
 *.class
+
+# Claude Code 로컬 설정
+.claude/
