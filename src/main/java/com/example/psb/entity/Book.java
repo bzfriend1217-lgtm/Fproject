@@ -28,7 +28,7 @@ import jakarta.persistence.Table;
 @Entity                 // 이 클래스가 JPA 엔티티(= DB 테이블과 매핑됨)임을 선언
 @Table(name = "books")  // 매핑될 테이블 이름을 "books"로 지정 (생략 시 클래스명 사용)
 public class Book {
-
+        // Q: 이게 각 행의 열들을(column)들을 구별하는거지? 여기서 long, string 이런식으로 데이터 속성을 적고 그다음 column을 쓰고 다음 데이터로 넘어가는 식(column에 대한 특징이 먼저오네)으로 그 옆에다 그 값의 특징을 적고 밑에다
     /**
      * 기본 키(Primary Key, PK).
      *  - 각 행(책)을 유일하게 구분하는 식별자다.
@@ -102,7 +102,7 @@ public class Book {
      */
     public Book() {
     }
-
+        // Q: 이게 약간 그런건가? 파이선에서 함수 만들었을때 self쓰는듯한 그런거? 한마디로 자바의 문법인가?
     /**
      * 편의 생성자.
      *  - 크롤링한 값들을 한 번에 받아 객체를 손쉽게 만들기 위한 생성자.
@@ -115,6 +115,7 @@ public class Book {
      * @param detailUrl    상세 페이지 URL
      * @param imageUrl     표지 이미지 URL
      */
+        // Q: 여기서 @param 뒤에 오는건 자기 클래스안에서만 읽어오는게 가능한가?
     public Book(String title, double price, int rating,
                 String availability, String detailUrl, String imageUrl) {
         this.title = title;
@@ -131,7 +132,7 @@ public class Book {
     //  - Setter: 필드 값을 "설정/변경하는" 메서드 (예: setTitle("...") )
     //  - JPA와 Spring은 이 메서드들을 통해 필드에 접근하므로 만들어 두는 것이 표준이다.
     // ------------------------------------------------------------------------
-
+        // Q: 여기서는 public인데 그게 다른 곳에서 접근하기 위해서인가?
     public Long getId() {
         return id;
     }
