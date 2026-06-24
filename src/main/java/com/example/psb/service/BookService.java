@@ -94,7 +94,7 @@ public class BookService {
     // TODO(빈칸-1 / 이름 맞히기): 아래 메서드의 "이름"을 지웠다.
     //   단서 → 위 doc("제목에 특정 단어가 포함된 책들을 찾는다") + body의 findByTitleContaining 호출.
     //   이 역할에 어울리는 메서드 이름을 직접 지어 ______ 자리에 채워 보자.
-    public List<Book> ______(String keyword) {
+    public List<Book> findByTitle(String keyword) {
         // BookRepository에 우리가 직접 선언해 둔 쿼리 메서드를 사용. (LIKE '%keyword%')
         return bookRepository.findByTitleContaining(keyword);
     }
@@ -108,7 +108,7 @@ public class BookService {
     // TODO(빈칸-2 / 이름 맞히기): 아래 메서드의 "이름"을 지웠다.
     //   단서 → 위 doc("별점이 특정 값 이상인 책들을 찾는다") + body의 findByRatingGreaterThanEqual 호출.
     //   이 역할에 어울리는 메서드 이름을 직접 지어 ______ 자리에 채워 보자.
-    public List<Book> ______(int minRating) {
+    public List<Book> findByRating(int minRating) {
         return bookRepository.findByRatingGreaterThanEqual(minRating);
     }
 
@@ -116,8 +116,8 @@ public class BookService {
      * TODO(빈칸-3 / 설명 맞히기): 이 메서드의 "역할 설명"을 지웠다.
      *   단서 → 메서드 이름 findAllOrderByPriceAsc + body의 findAllByOrderByPriceAsc() 호출.
      *   이 메서드가 무슨 일을 하는지 한 줄로 적고, @return 설명도 채워 보자.
-     *
-     * @return (여기에 무엇이 반환되는지 적어 보자)
+     *  책 전부를 가격순으로 나열(오름차순 인듯? 이게 ASC니깐)
+     * @return 책을 오름 차순으로 정렬
      */
     public List<Book> findAllOrderByPriceAsc() {
         return bookRepository.findAllByOrderByPriceAsc();
