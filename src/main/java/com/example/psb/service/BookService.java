@@ -7,111 +7,104 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * BookService
- * ----------------------------------------------------------------------------
- * 이미 DB에 저장된 책 데이터를 "조회/검색"하는 일을 담당하는 서비스(핵심 기능) 클래스다.
- *
- * [BookCrawlerService 와 무엇이 다른가?]
- *  - BookCrawlerService : 인터넷에서 책을 긁어와 DB에 "저장"하는 역할 (쓰기 중심).
- *  - BookService(이 클래스): 이미 저장된 책을 "꺼내 보는" 역할 (읽기 중심).
- *  - 이렇게 역할을 나눠 두면, 나중에 화면(Controller)이나 다른 코드가
- *    "책 목록을 보여줘", "별점 높은 책만 줘" 같은 요청을 할 때
- *    이 클래스의 메서드만 호출하면 되어 깔끔하다.
- *
- * [왜 Repository를 직접 안 쓰고 Service를 한 겹 더 두나?]
- *  - Repository는 "DB에서 데이터를 꺼내오는 순수한 통로"다.
- *  - Service는 그 위에서 "어떤 규칙으로 데이터를 다룰지"(비즈니스 로직)를 담는 자리다.
- *  - 지금은 단순히 Repository를 그대로 호출하지만, 나중에 검증/가공/조합 같은
- *    로직이 늘어나면 모두 이 Service 안에 모아 둘 수 있다.
- *
- * [@Service 란?]
- *  - "이 클래스는 비즈니스 로직을 담당하는 부품이다"라고 Spring에게 알리는 표식.
- *  - 이렇게 표시하면 Spring이 객체(빈, Bean)를 자동으로 만들어 관리해 준다.
- * ----------------------------------------------------------------------------
- */
-@Service
+// ============================================================================
+// [무엇인가] BookService = 이미 저장된 책을 "꺼내 보는" 읽기 전용 창구 (조회 로직)
+// ----------------------------------------------------------------------------
+// [Layer Docking Map] 누가 누구에게 도킹하는가
+//
+//   (미래) Controller ──> BookService ──> BookRepository ──> [books] (H2)
+//                          (이 파일)        (DB 출입문)         (테이블)
+//                          읽기 중심           │
+//                                       Spring Data JPA가 SQL 발행
+//
+// [쓰기 vs 읽기 분리] 같은 books 테이블을 두 서비스가 역할로 나눠 쓴다
+//   ┌ BookCrawlerService : 인터넷 → DB  "저장(save)"    ── 쓰기 중심
+//   └ BookService (이 파일): DB → 바깥   "조회(find)"     ── 읽기 중심
+//
+// [HTTP End-to-End Flow Map] 예) 별점 4점 이상 책 조회 (Controller 연결 시)
+//
+//   [Ingress]  GET /books?minRating=4
+//        │  (Tomcat 스레드가 요청 1건을 잡음)
+//        ▼
+//   Controller ──minRating(int)──> BookService.findByRating(4)
+//        │                                │
+//        │                                ▼
+//        │                    bookRepository.findByRatingGreaterThanEqual(4)
+//        │                                │  SQL ▶ SELECT * FROM books WHERE rating >= 4
+//        │                                ▼
+//        │                          List<Book> (Heap)
+//        ▼
+//   [Egress]  200 OK + JSON 배열  [ {id,title,price,rating,...}, ... ]
+//
+//   [Exception U-Turn] DB 커넥션 고갈/쿼리 실패 시
+//     Repository ✖ ──throw──> Service(그냥 통과) ──> Controller ──> 500 + 에러 JSON
+//     (이 클래스엔 try-catch 없음 → 예외를 위로 "전파"만 한다)
+// ============================================================================
+@Service // [퀴즈] "이 클래스는 비즈니스 로직 부품(Bean)"임을 Spring에 알리는 애너테이션
 public class BookService {
 
-    /**
-     * 책 데이터에 접근하는 저장소.
-     *  - final : 한 번 정해지면 바뀌지 않는다는 표시.
-     *  - 아래 생성자를 통해 Spring이 자동으로 넣어준다. (의존성 주입, DI)
-     */
+    // [의존성] DB 출입문. final = 한 번 꽂히면 안 바뀜 → 무상태 보장에 기여.
     private final BookRepository bookRepository;
 
-    /**
-     * 생성자.
-     *  - Spring이 이 서비스 객체를 만들 때, BookRepository 빈을 찾아 자동으로 끼워준다.
-     *  - "필요한 부품을 밖에서 받아 끼우는 것" = 의존성 주입(DI).
-     */
+    // [생성자 주입(DI)] Spring이 BookRepository Bean을 찾아 자동으로 끼워준다.
+    //   필드가 1개뿐이라 @Autowired 생략 가능 (생성자가 1개면 자동 인식).
     public BookService(BookRepository bookRepository) {
         this.bookRepository = bookRepository;
     }
 
     // ------------------------------------------------------------------------
-    // 조회(읽기) 기능들
+    // 조회(읽기) 기능들 — 전부 "Repository에 위임"하는 얇은 통로 (지금은 가공 없음)
+    //
+    //   [위임 패턴] Service 메서드 ──그대로 호출──> Repository 메서드
+    //   나중에 검증/필터/조합 로직이 생기면 "이 자리"에 끼워 넣으면 됨.
     // ------------------------------------------------------------------------
 
-    /**
-     * 저장된 모든 책을 가져온다.
-     *
-     * @return 책 전체 목록 (List<Book> : 여러 개의 Book을 담는 목록)
-     */
+    // [전체 조회] SELECT * FROM books   (JpaRepository 공짜 기본 메서드)
     public List<Book> findAll() {
-        // findAll()은 JpaRepository가 공짜로 제공하는 기본 메서드다. (SELECT * FROM books)
         return bookRepository.findAll();
     }
 
-    /**
-     * PK(id)로 책 1권을 찾는다.
-     *
-     * @param id 찾고 싶은 책의 기본 키(번호)
-     * @return 찾은 Book. 없을 수도 있으므로 Optional로 감싸 반환한다.
-     *         - Optional<Book> : "값이 있을 수도, 없을 수도 있는 상자"라는 뜻.
-     *           (null 때문에 생기는 오류를 줄이기 위한 자바의 안전장치)
-     */
+    // [PK 1건 조회] SELECT * FROM books WHERE id = ?
+    //   반환이 Optional 인 이유: 그 id가 "없을 수도" 있음 → null 대신 빈 상자.
+    // TODO(빈칸): 없을 수도 있는 값을 감싸는 안전 상자 타입은?  ________<Book>
     public Optional<Book> findById(Long id) {
         return bookRepository.findById(id);
     }
 
-    /**
-     * 저장된 책이 모두 몇 권인지 센다.
-     *
-     * @return 전체 책 개수
-     */
+    // [개수 세기] SELECT count(*) FROM books   (JpaRepository 공짜 기본 메서드)
     public long count() {
-        // count()도 JpaRepository 기본 메서드. (SELECT count(*) FROM books)
         return bookRepository.count();
     }
 
-    /**
-     * 제목에 특정 단어가 포함된 책들을 찾는다. (간단한 검색)
-     *
-     * @param keyword 검색어 (예: "Light")
-     * @return 제목에 keyword가 들어간 책 목록
-     */
+    // [제목 검색] title 에 keyword 가 포함된 책.  SQL ▶ ... WHERE title LIKE %?%
+    // TODO(이름 맞히기): Repository의 어떤 메서드로 위임?  bookRepository.findByTitle__________(keyword)
     public List<Book> findByTitle(String keyword) {
-        // BookRepository에 우리가 직접 선언해 둔 쿼리 메서드를 사용. (LIKE '%keyword%')
         return bookRepository.findByTitleContaining(keyword);
     }
 
-    /**
-     * 별점이 특정 값 "이상"인 책들을 찾는다. (예: 4점 이상만 보기)
-     *
-     * @param minRating 최소 별점 (이 값 포함, 이상)
-     * @return 조건을 만족하는 책 목록
-     */
+    // [별점 필터] rating 이 minRating 이상(>=)인 책.  SQL ▶ ... WHERE rating >= ?
     public List<Book> findByRating(int minRating) {
         return bookRepository.findByRatingGreaterThanEqual(minRating);
     }
 
-    /**
-     * 저장된 책 전부를 가격이 낮은 순서(오름차순, ASC)로 정렬해 반환한다.
-     *
-     * @return 가격 오름차순으로 정렬된 책 목록
-     */
+    // [정렬 조회] 가격 오름차순 전체.  SQL ▶ ... ORDER BY price ASC ("저렴한 순")
     public List<Book> findAllOrderByPriceAsc() {
         return bookRepository.findAllByOrderByPriceAsc();
     }
 }
+
+// [Stateless Check]
+//  유일한 멤버 변수 bookRepository 는 final 싱글톤(읽기 전용 참조)이라 상태가 아니다.
+//  모든 입력(id/keyword/minRating)과 결과(List<Book>)는 메서드 인자·지역 변수로만
+//  흐르므로 각 스레드의 Stack에 격리된다.
+//  → 200개 스레드가 동시에 조회해도 서로의 값을 덮어쓰지 않는다. (동시성 안전)
+//
+//   [ 스레드별 Stack (격리) ]            [ 공용 Heap (공유) ]
+//   ┌─────────────────────────┐         ┌──────────────────────────┐
+//   │ Thread-1 findByRating(4) │ ──┐     │ BookService (싱글톤 1개)  │
+//   │  └ local: minRating=4    │   │     │  └ bookRepository(final) │
+//   └─────────────────────────┘   ├───> │ BookRepository (싱글톤)   │
+//   ┌─────────────────────────┐   │     │                          │
+//   │ Thread-2 findByTitle(..) │ ──┘     │ List<Book> (조회 결과)    │
+//   │  └ local: keyword="Light"│         │  : 호출마다 새로 생성     │
+//   └─────────────────────────┘         └──────────────────────────┘
