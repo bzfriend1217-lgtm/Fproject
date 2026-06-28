@@ -11,171 +11,132 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/**
- * BookController
+/*
  * ============================================================================
- * 웹 브라우저(또는 외부 프로그램)의 HTTP 요청을 가장 먼저 받아,
- * 알맞은 주방(BookService)의 메서드로 연결해 주는 "최상단 입구(Controller) 계층"이다.
+ *  BookController  ─ 웹 요청의 "최상단 입구(주문 받는 카운터)" 계층
+ * ============================================================================
  *
- * [3층 구조 다시 보기 — 손님 주문이 흘러가는 길]
- *   Controller (이 클래스, 손님 응대 = 주문 받기)
- *        ↓ 호출
- *   Service (주방 = 요리 = 비즈니스 로직)
- *        ↓ 호출
- *   Repository (창고 = DB에서 재료 꺼내오기)
- *   - 이 클래스는 "DB가 어떻게 생겼는지" 전혀 모른다.
- *     오직 "어떤 URL이 오면 Service의 어떤 메서드를 부를지"만 안다. (역할 분리)
+ * [① UML & 도킹 관계]  ─ Controller는 DB 생김새를 1도 모른다. URL→Service 연결만.
+ *
+ *   Client(브라우저)
+ *      │  HTTP GET /api/books/...
+ *      ▼
+ *   ┌───────────────────┐  uses   ┌──────────────┐  uses   ┌─────────────────┐
+ *   │  BookController    │ ──────▶ │  BookService │ ──────▶ │ BookRepository  │
+ *   │  (@RestController) │ (final) │  (@Service)  │ (final) │ (JpaRepository) │
+ *   └───────────────────┘         └──────────────┘         └────────┬────────┘
+ *        "주문 받기"                  "요리 / 규칙"                    │ SELECT
+ *                                                                    ▼
+ *                                                               [ books ] (DB)
  *
  * ----------------------------------------------------------------------------
- * [핵심: 브라우저의 요청이 어떻게 이 Controller 빈과 "만나는가"]
- *  (네가 방금 배운 톰캣 스레드 풀 · 싱글톤 빈 · 힙/스택이 여기서 전부 만난다.)
+ * [② 메모리 맵]  ─ 싱글톤 빈 1개를 200개 스레드가 공유해도 안전한 이유.
  *
- *  1) 브라우저가 http://localhost:8080/api/books 로 HTTP 요청을 보낸다.
+ *   [ 스레드별 Stack (격리) ]                 [ 공용 Heap (공유) ]
+ *   ┌──────────────────────────┐             ┌──────────────────────────┐
+ *   │ Thread-1 searchByTitle() │             │  BookController (Bean)    │
+ *   │   └ keyword="Light"  ◀───┼── 값 격리    │   : 싱글톤 딱 1개          │
+ *   ├──────────────────────────┤             │   └ bookService (final)   │
+ *   │ Thread-2 getBookById()   │             │                           │
+ *   │   └ id=3             ◀───┼── 값 격리    │  List<Book> / Book (결과) │
+ *   └──────────────────────────┘             └──────────────────────────┘
+ *    지역변수=각자 스택→안 섞임                참조(주소)만 스택에 올라감
  *
- *  2) 스프링 부트 안에 내장된 톰캣(Tomcat, 웹 서버)이 그 요청을 받는다.
- *     - 톰캣은 미리 만들어 둔 "일꾼 스레드 풀"에서 노는 스레드 1개를 깨워
- *       이 요청 1건을 처리하게 시킨다. (요청 1건 = 일꾼 스레드 1명이 담당)
- *
- *  3) 그 일꾼 스레드는 DispatcherServlet(요청을 분배하는 중앙 교환원)에게 간다.
- *     - DispatcherServlet이 "GET /api/books 는 누가 처리하지?"라고 묻고,
- *       HandlerMapping(주소록)이 "BookController.getAllBooks() 가 담당"이라 답한다.
- *
- *  4) 그래서 일꾼 스레드는 아래 getAllBooks() 메서드를 실행한다.
- *     - 이때 호출되는 BookController 객체는 앱 전체에 "딱 하나뿐"이다. (싱글톤 빈)
- *       즉, 동시에 손님 100명이 와도 100명 모두 "같은 하나의 BookController"를
- *       공유해서 쓴다. (객체를 매번 새로 만들지 않아 빠르고 메모리도 아낀다.)
- *
- *  5) [싱글톤인데 왜 안전한가? — 힙/스택 복습]
- *     - 하나의 객체를 여러 스레드가 동시에 쓰면 보통 위험하다(데이터가 섞임).
- *     - 하지만 이 Controller가 가진 필드는 bookService 하나뿐이고, 그것도 final이라
- *       절대 바뀌지 않는다. → 공유해도 안전하다. (상태가 없는 = stateless 객체)
- *     - 손님마다 다른 값(예: 검색어 keyword, 책 번호 id)은 "메서드의 파라미터/지역변수"다.
- *       지역변수는 각 일꾼 스레드가 자기만의 "스택(stack)"에 따로 쌓는다.
- *       → 스레드끼리 서로 안 섞인다. (그래서 하나의 빈을 공유해도 충돌이 없다.)
- *     - 반면 Book 객체나 List 같은 결과물은 "힙(heap)"에 만들어지고,
- *       스택에는 그 힙 객체를 가리키는 "주소(참조)"만 올라간다.
- *
- *  6) 메서드가 리턴한 값(Book, List<Book> 등)을 스프링이 자동으로 JSON 글자로 바꿔
- *     HTTP 응답에 실어 브라우저로 돌려보낸다. (@RestController 덕분, 아래 설명)
- *
- *  7) 응답을 다 보내면 그 일꾼 스레드는 다시 스레드 풀로 "반납"되어 다음 손님을 기다린다.
  * ----------------------------------------------------------------------------
+ * [③ HTTP 엔드투엔드 물줄기]  ─ 예: GET /api/books/search?keyword=Light
  *
- * [@RestController 란?]
- *  - "이 클래스는 웹 요청을 처리하는 컨트롤러 빈이다"라고 스프링에게 알리는 표식이다.
- *  - 정확히는 @Controller + @ResponseBody 를 합친 것.
- *  - @ResponseBody 의 효과: 메서드가 리턴한 값을 "화면(HTML 페이지) 이름"이 아니라
- *    "HTTP 응답 본문 그 자체(보통 JSON 데이터)"로 본다.
- *    → 즉 List<Book> 을 리턴하면 스프링이 알아서 JSON 배열로 변환해 응답해 준다.
+ *   (Ingress)        (Routing)                  (Processing)           (Egress)
+ *   Browser ─GET─▶ Tomcat Thread ─▶ Dispatcher ─▶ Controller ─▶ Service ─▶ Repo ─▶ DB
+ *    ?keyword=Light  (풀에서 1명)     Servlet      searchByTitle  findByTitle  LIKE %..%
+ *                                    +HandlerMap      │                          │
+ *                                                     ▼   List<Book>(Heap) ◀──────┘
+ *                            JSON [{..},{..}] ◀─ @ResponseBody 자동 변환
+ *   Browser ◀─ 200 OK + JSON Body ───────────────────┘
  *
- * [@RequestMapping("/api/books") 란?]
- *  - 이 컨트롤러 안 모든 메서드가 공통으로 쓰는 "주소의 앞부분(접두어)"을 정한다.
- *  - 아래 각 메서드의 @GetMapping 주소는 이 앞부분에 이어 붙는다.
- *    예) @GetMapping("/count") → 실제 주소는 /api/books/count
+ *   데이터 변환:  쿼리스트링 "?keyword=Light"  ─▶  String keyword
+ *                ─▶  List<Book> (Entity, DTO 없이 직접 반환)  ─▶  JSON
+ *
+ * ----------------------------------------------------------------------------
+ * [핵심 표식 두 가지]
+ *   @RestController        = @Controller + @ResponseBody. 리턴값을 화면이름이 아닌
+ *                            "HTTP 응답 본문(JSON)"으로 본다.
+ *   @RequestMapping("/api/books") = 이 안 모든 메서드 주소의 공통 접두어.
+ *                            예) @GetMapping("/count") → 실제 주소 /api/books/count
+ *
+ * ----------------------------------------------------------------------------
+ *  ⚠️ Active Recall: 아래 코드에 // TODO(빈칸N) 4개를 뚫어 두었습니다.
+ *     채워야 컴파일됩니다. (정답이 필요하면 "정답키 알려줘"라고 요청하세요.)
  * ============================================================================
  */
-@RestController                  // 이 클래스 = 웹 컨트롤러 빈(리턴값을 JSON 응답 본문으로)
-@RequestMapping("/api/books")    // 이 안의 모든 주소 앞에 /api/books 가 붙는다
+@RestController                  // 이 클래스 = 웹 컨트롤러 빈(리턴값을 JSON 본문으로)
+@RequestMapping("/api/books")    // 이 안 모든 주소 앞에 /api/books 가 붙는다
 public class BookController {
 
-    /**
-     * 주방(BookService)으로 연결하기 위한 통로.
-     *  - final : 한 번 정해지면 바뀌지 않는다는 표시.
-     *  - 이 필드가 "바뀌지 않는 값" 하나뿐이라, 싱글톤 빈을 여러 스레드가
-     *    동시에 공유해도 안전한 이유가 된다. (위 5번 설명 참고)
-     */
-    private final BookService bookService;
+    private final BookService bookService;   // 유일한 멤버(final) → [④] Stateless 근거
 
-    /**
-     * 생성자.
-     *  - 스프링이 이 컨트롤러 빈을 "딱 하나" 만들 때, 이미 만들어 둔 BookService 빈을
-     *    찾아 자동으로 끼워 넣어준다. (의존성 주입, DI = 필요한 부품을 밖에서 받아 끼우기)
-     */
+    // 생성자 주입(DI): 스프링이 미리 만든 BookService 빈을 찾아 자동으로 끼워준다.
     public BookController(BookService bookService) {
         this.bookService = bookService;
     }
 
     // ========================================================================
-    // 아래부터는 "어떤 주소(URL)로 오면 어떤 일을 할지"를 적는 연결표(매핑)들이다.
-    //  - @GetMapping : HTTP GET 방식 요청(주로 "조회/읽기")을 처리한다는 표시.
-    //    (브라우저 주소창에 주소를 치고 엔터 = GET 요청)
+    //  연결표(매핑) — "어떤 URL이 오면 Service의 어떤 메서드를 부를지"
+    //  @GetMapping = HTTP GET(조회/읽기) 요청 처리 표식.
     // ========================================================================
 
-    /**
-     * [전체 목록] 저장된 모든 책을 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books
-     *  - 흐름: 이 메서드 → bookService.findAll() → repository → DB(SELECT *)
-     *  - 리턴한 List<Book> 은 스프링이 JSON 배열 [ {...}, {...} ] 로 바꿔 응답한다.
-     */
+    // [메커니즘] 전체 목록: GET /api/books → findAll() → SELECT * → JSON 배열
     @GetMapping
     public List<Book> getAllBooks() {
         return bookService.findAll();
     }
 
-    /**
-     * [개수] 저장된 책이 총 몇 권인지 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books/count
-     *  - 주의: 이 "/count" 매핑을 아래 "/{id}" 매핑보다 위에 두는 이유 →
-     *    스프링은 "글자가 똑 떨어지는 주소(/count)"를 "변하는 자리(/{id})"보다
-     *    더 우선해서 매칭한다. 그래도 사람이 읽기 좋게 먼저 적어 둔다.
-     */
+    // [메커니즘] 개수: GET /api/books/count → SELECT count(*) → long 1개
+    // [퀴즈] findAll 처럼 JpaRepository가 공짜로 주는 기본 메서드다.
     @GetMapping("/count")
     public long getBookCount() {
-        return bookService.count();
+        return bookService./* TODO(빈칸4): 전체 개수를 세는 메서드명? (단서: SELECT count(*)) */();
     }
 
-    /**
-     * [제목 검색] 제목에 특정 단어가 들어간 책들을 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books/search?keyword=Light
-     *  - @RequestParam : 주소 뒤 "?keyword=Light" 같은 질의 문자열(쿼리 파라미터)에서
-     *    keyword 값을 꺼내 메서드 파라미터로 넣어준다.
-     *    (여기서 keyword="Light" 라는 값은 이 요청을 맡은 스레드의 "스택"에만 존재한다)
-     */
+    // [메커니즘] 제목 검색: GET /api/books/search?keyword=Light → LIKE '%Light%'
+    // [퀴즈] keyword="Light" 라는 값은 어느 스레드의 무엇(Stack/Heap)에만 존재하나? ([②] 참고)
     @GetMapping("/search")
-    public List<Book> searchByTitle(@RequestParam String keyword) {
+    public List<Book> searchByTitle(/* TODO(빈칸1): ?keyword=.. 쿼리값을 꺼내는 애너테이션? */ String keyword) {
         return bookService.findByTitle(keyword);
     }
 
-    /**
-     * [별점 필터] 별점이 특정 값 "이상"인 책들을 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books/rating?min=4
-     *  - @RequestParam("min") : 쿼리 파라미터 이름은 "min"인데,
-     *    자바 쪽 변수 이름은 minRating 으로 다르게 쓰고 싶을 때 괄호로 짝지어 준다.
-     */
+    // [메커니즘] 별점 필터: GET /api/books/rating?min=4 → 별점 4 이상
+    // ("min" 쿼리이름 ↔ minRating 자바변수명을 괄호로 짝지어 준다)
     @GetMapping("/rating")
     public List<Book> getByRating(@RequestParam("min") int minRating) {
         return bookService.findByRating(minRating);
     }
 
-    /**
-     * [가격 정렬] 모든 책을 가격이 낮은 순서로 정렬해 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books/sorted-by-price
-     */
+    // [메커니즘] 가격 오름차순 정렬: GET /api/books/sorted-by-price → ORDER BY price ASC
     @GetMapping("/sorted-by-price")
     public List<Book> getAllSortedByPrice() {
         return bookService.findAllOrderByPriceAsc();
     }
 
-    /**
-     * [1권 조회] 책 번호(id)로 책 1권을 찾아 돌려준다.
-     *  - 요청 예: GET http://localhost:8080/api/books/3   ← 끝의 3이 id
-     *  - @PathVariable : 주소 경로 안의 "{id}" 자리에 들어온 값(여기선 3)을
-     *    그대로 메서드 파라미터 id 로 꺼내 준다. (위 @RequestParam 의 ?키=값 방식과 다름)
-     *
-     *  - 반환 타입 ResponseEntity<Book> 이란?
-     *      "HTTP 응답을 통째로(상태 코드 + 본문) 직접 만들어 돌려주는 상자"다.
-     *      책을 찾았는지/못 찾았는지에 따라 응답을 다르게 주기 위해 사용한다.
-     *        · 찾았으면  → 200 OK 와 함께 그 책(JSON)을 담아 보낸다.
-     *        · 못 찾았으면 → 404 Not Found (그런 책 없음) 를 보낸다.
-     *
-     *  - findById 는 Optional<Book>("값이 있을 수도/없을 수도 있는 상자")을 돌려준다.
-     *      .map(...)            : 값이 "있으면" 그 책으로 200 OK 응답을 만든다.
-     *      .orElseGet(...)      : 값이 "없으면" 대신 404 응답을 만든다.
-     */
+    // [메커니즘] 1권 조회: GET /api/books/3 ← 끝의 3이 경로상의 {id}
+    //   ?키=값(@RequestParam)과 달리, 경로 칸의 값은 다른 애너테이션으로 꺼낸다.
+    //   ResponseEntity = 상태코드+본문을 통째로 직접 조립하는 상자(찾음/못찾음 분기용).
+    //
+    // [⑤ 예외 U-턴 맵] (이 메서드가 무대)
+    //   findById → Optional<Book>(있을수도/없을수도 상자)
+    //     · 값 있으면 → .map(...)      → 200 OK + 책(JSON)
+    //     · 값 없으면 → .orElseGet(...) → 404 Not Found
+    //     · DB 커넥션 고갈 등 진짜 예외 → Repo가 throw → Service 전파 → Controller 전파
+    //                                  → 스프링이 가로채 500 + 에러 JSON 으로 U-턴
     @GetMapping("/{id}")
-    public ResponseEntity<Book> getBookById(@PathVariable Long id) {
+    public ResponseEntity<Book> getBookById(/* TODO(빈칸2): 경로 {id} 칸의 값을 꺼내는 애너테이션? */ Long id) {
         return bookService.findById(id)
-                .map(book -> ResponseEntity.ok(book))          // 있으면 200 OK + 책
-                .orElseGet(() -> ResponseEntity.notFound().build()); // 없으면 404
+                .map(book -> ResponseEntity.ok(book))                       // 있으면 200 OK + 책
+                .orElseGet(() -> ResponseEntity./* TODO(빈칸3): 못 찾았을 때 상태코드 메서드? */().build()); // 없으면 404
     }
+
+    // ========================================================================
+    // [④ Stateless Check]: 멤버는 final bookService 1개뿐(상태 변경 없음).
+    //   손님별 값(keyword, id, minRating)은 전부 메서드 지역변수(Stack)에 격리되므로,
+    //   200개 스레드가 같은 Controller 빈을 동시에 써도 동시성 충돌이 없다.
+    // ========================================================================
 }
