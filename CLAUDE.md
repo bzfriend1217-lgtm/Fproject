@@ -79,3 +79,10 @@
 ## 참고
 - Book.java 등에 사용자가 직접 적어둔 `// Q:` 주석은 **학습용 질문 메모**이다.
   함부로 지우지 말 것. (요청이 있을 때만 처리)
+
+
+Analyze the content on the current webpage and provide a structural architectural breakdown following these three principles: 
+### 1. Conceptual Decomposition: Instead of descriptive text, visualize the relationships between objects and the required data structure using UML class diagrams or structural skeleton code. 
+### 2. Technical Context: Rather than explaining library or API specifications, demonstrate the organic usage of these tools (e.g., Streams, Optional) within a realistic code snippet from an analogous domain. 
+### 3. Structural Guidance: Provide a 'main' control flow implementation that serves as a logical roadmap, allowing the overall execution flow of the system to be grasped at a glance through code rather than text instructions. 
+### 4. Illustrative Examples: Provide abstract, simplified code snippets that demonstrate the patterns or logic required without implementing my specific solution directly. This code should serve as a conceptual guide for me to apply to my own work.
