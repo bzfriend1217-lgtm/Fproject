@@ -13,45 +13,69 @@ import java.io.IOException;
 /**
  * BookCrawlerService
  * ----------------------------------------------------------------------------
- * "Books to Scrape"(http://books.toscrape.com) 사이트를 실제로 긁어와서(크롤링)
- * 책 정보를 Book 객체로 만들고, BookRepository를 통해 H2 DB에 저장하는 핵심 로직.
+ * "Books to Scrape"(http://books.toscrape.com)를 실제로 긁어와(크롤링)
+ * Book 객체로 만들고, BookRepository를 통해 H2 DB에 저장하는 핵심 로직.
  *
- * [전체 동작 흐름]
- *   1) Jsoup으로 목록 페이지 HTML을 통째로 받아온다.
- *   2) HTML에서 책 1권에 해당하는 덩어리(article.product_pod)를 모두 찾는다.
- *   3) 각 덩어리에서 제목/가격/별점/재고/링크/이미지 값을 뽑아낸다.
- *   4) 뽑은 값으로 Book 객체를 만든다.
- *   5) 이미 저장된 책이 아니면 DB에 save() 한다.
- *   6) 다음 페이지로 넘어가 1~5를 반복한다.
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ ① [UML Class Diagram & Relationship]                                      │
+ * │                                                                           │
+ * │   CrawlerRunner ──(calls)──> BookCrawlerService ──(uses)──> BookRepository│
+ * │                                      │                            │       │
+ * │                              (Jsoup로 HTML 수집)            (saves Entity) │
+ * │                                      │                            ▼       │
+ * │                              [HTML Element] ──parse──> [Book] ──> books(DB)│
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ ③ [End-to-End 데이터 물줄기]  (HTTP는 "내가 외부로 거는" 방향)            │
+ * │                                                                           │
+ * │  (Egress) ─GET─> books.toscrape.com/catalogue/page-N.html                 │
+ * │  (Ingress) <─HTML 200─ 응답 본문(통째로)                                   │
+ * │       │                                                                   │
+ * │   String(HTML)  ──Jsoup.parse──>  Document                                │
+ * │       │                              │ select("article.product_pod")      │
+ * │       │                              ▼                                     │
+ * │   Elements(책 N개)  ──parseBook──>  Book 객체  ──save──>  books 테이블 row  │
+ * └─────────────────────────────────────────────────────────────────────────┘
  *
  * [@Service 란?]
- *   - "이 클래스는 비즈니스 로직(핵심 기능)을 담당하는 부품이다"라고 Spring에게 알리는 표식.
- *   - 이렇게 표시해 두면 Spring이 이 클래스의 객체를 자동으로 만들어 관리해 준다.
- *     (이렇게 Spring이 만들어 관리하는 객체를 "빈(Bean)"이라고 부른다.)
+ *   - "이 클래스는 비즈니스 로직 부품"이라고 Spring에 알리는 표식.
+ *   - Spring이 객체를 자동 생성·관리한다. (이 객체를 "빈(Bean)"이라 부른다.)
  * ----------------------------------------------------------------------------
  */
 @Service
 public class BookCrawlerService {
-    // 테스트
+
     /**
      * 책을 DB에 저장할 때 쓰는 저장소.
      *  - final : 한 번 정해지면 바뀌지 않는다는 표시.
-     *  - 이 값은 아래 "생성자"를 통해 Spring이 자동으로 넣어준다. (의존성 주입)
+     *  - 아래 "생성자"를 통해 Spring이 자동으로 넣어준다. (의존성 주입, DI)
      */
     private final BookRepository bookRepository;
 
-    /**
-     * 크롤링할 목록 페이지 주소 틀(template).
-     *  - %d 자리에 페이지 번호(1, 2, 3 ...)가 들어간다.
-     *  - 예: page-1.html, page-2.html ...
-     *  - static final : 모든 객체가 공유하는 "절대 안 변하는 상수"라는 뜻.
-     */
+    // ------------------------------------------------------------------------
+    // [상수] 안 변하는 값은 위에 모아 이름을 붙인다. (static final = 모든 객체 공유)
+    //  - 흩어진 "매직 문자열"을 이름 있는 상수로 모으면, HTML 구조가 바뀌어도
+    //    여기 한 곳만 고치면 된다. (유지보수 ↑)
+    // ------------------------------------------------------------------------
+
+    /** 목록 페이지 주소 틀. %d 자리에 페이지 번호(1,2,3...)가 들어간다. */
     private static final String PAGE_URL = "http://books.toscrape.com/catalogue/page-%d.html";
+
+    /** 책 1권 덩어리 / 각 값으로 가는 CSS 셀렉터(=HTML 속 위치를 가리키는 주소). */
+    private static final String SEL_PRODUCT      = "article.product_pod"; // 책 1권 덩어리
+    private static final String SEL_TITLE_LINK   = "h3 a";                // 제목 + 상세링크
+    private static final String SEL_PRICE        = "p.price_color";       // 가격
+    private static final String SEL_STAR         = "p.star-rating";       // 별점
+    private static final String SEL_AVAILABILITY = "p.instock.availability"; // 재고
+    private static final String SEL_IMAGE        = ".image_container img"; // 표지 이미지
+
+    /** 별점 단어표: 인덱스 0=One(=1점) ... 4=Five(=5점). parseRating에서 사용. */
+    private static final String[] RATING_WORDS = {"One", "Two", "Three", "Four", "Five"};
 
     /**
      * 생성자.
-     *  - Spring이 이 서비스 객체를 만들 때, BookRepository 빈을 찾아 자동으로 넣어준다.
-     *  - 이렇게 "필요한 부품을 밖에서 받아 끼우는 것"을 의존성 주입(DI)이라고 한다.
+     *  - Spring이 이 서비스를 만들 때 BookRepository 빈을 찾아 자동으로 끼워준다.
      */
     public BookCrawlerService(BookRepository bookRepository) {
         this.bookRepository = bookRepository;
@@ -60,54 +84,44 @@ public class BookCrawlerService {
     /**
      * 지정한 페이지 수만큼 크롤링해서 DB에 저장한다.
      *
+     * ┌─────────────────────────────────────────────────────────────────────┐
+     * │ ⑤ [예외 발생 시 역방향(U-Turn) 물줄기]                                 │
+     * │                                                                       │
+     * │   Jsoup.get()  ──타임아웃/404/500──>  IOException 발생                 │
+     * │        │                                   │                          │
+     * │        └── 이 페이지 처리만 포기하고 ──────┘                          │
+     * │            catch에서 메시지만 찍은 뒤 → 다음 page로 for문 계속.        │
+     * │   (즉, 한 페이지가 실패해도 전체 크롤링은 멈추지 않는다.)              │
+     * └─────────────────────────────────────────────────────────────────────┘
+     *
      * @param maxPages 최대 몇 페이지까지 긁을지 (사이트 전체는 50페이지)
      * @return 실제로 새로 저장한 책 개수
      */
     public int crawlAndSave(int maxPages) {
-        int savedCount = 0; // 새로 저장한 책 수를 세는 변수
+        int savedCount = 0; // 새로 저장한 책 수를 세는 변수 (지역변수 = Stack에 격리)
 
-        // 1페이지부터 maxPages까지 반복 (파이썬의 for page in range(1, maxPages+1) 과 같음)
         for (int page = 1; page <= maxPages; page++) {
-
-            // %d 자리에 현재 페이지 번호를 끼워 완성된 주소를 만든다.
             String url = String.format(PAGE_URL, page);
             System.out.println("[크롤링] 페이지 접속: " + url);
 
             try {
-                // (핵심) Jsoup으로 해당 주소의 HTML을 통째로 받아온다.
-                //  - userAgent: 우리가 어떤 브라우저인 척할지 (서버가 차단하지 않도록)
-                //  - timeout: 10초 안에 응답 없으면 포기
-                //  - get(): 실제로 접속해서 HTML 문서(Document)를 가져옴
-                Document doc = Jsoup.connect(url)
-                        .userAgent("Mozilla/5.0 (PSB-Crawler)")
-                        .timeout(10_000)
-                        .get();
+                Document doc = fetchPage(url);                 // HTML 통째로 받아오기
+                Elements products = doc.select(SEL_PRODUCT);   // 책 덩어리 전부 찾기
 
-                // HTML 안에서 책 한 권에 해당하는 덩어리들을 전부 찾는다.
-                //  - select("article.product_pod"): <article class="product_pod"> 태그들을 모두 선택
-                //  - Elements : 그 덩어리들의 목록 (여러 개)
-                Elements products = doc.select("article.product_pod");
-
-                // 더 이상 책이 없으면(빈 페이지면) 반복을 멈춘다.
-                if (products.isEmpty()) {
+                if (products.isEmpty()) {                      // 빈 페이지면 종료
                     System.out.println("[크롤링] 더 이상 책이 없어 종료합니다.");
                     break;
                 }
 
-                // 찾은 책 덩어리를 하나씩 꺼내 처리 (파이썬의 for product in products 와 같음)
                 for (Element product : products) {
-                    Book book = parseBook(product); // 덩어리 -> Book 객체로 변환
-
-                    // 이미 저장된 책(같은 상세 URL)이 아니라면 새로 저장한다. (중복 방지)
-                    if (!bookRepository.existsByDetailUrl(book.getDetailUrl())) {
-                        bookRepository.save(book);
+                    Book book = parseBook(product);            // 덩어리 -> Book 객체
+                    if (saveIfNew(book)) {                     // 중복 아니면 저장
                         savedCount++;
                     }
                 }
 
             } catch (IOException e) {
-                // 네트워크 오류 등으로 접속이 실패하면, 프로그램을 멈추지 않고
-                // 메시지만 출력한 뒤 다음 페이지로 넘어간다.
+                // 네트워크 오류 등으로 접속 실패 시 → 멈추지 않고 다음 페이지로.
                 System.out.println("[크롤링] 페이지 처리 실패: " + url + " (" + e.getMessage() + ")");
             }
         }
@@ -117,37 +131,50 @@ public class BookCrawlerService {
     }
 
     /**
-     * 책 덩어리(HTML 조각) 하나에서 필요한 값들을 뽑아 Book 객체로 만든다.
+     * 주소(url) 하나에 접속해 HTML 문서(Document)를 받아온다.
+     *  - userAgent : 어떤 브라우저인 척할지 (서버 차단 회피)
+     *  - timeout   : 10초 안에 응답 없으면 포기 -> IOException
+     *
+     * @throws IOException 접속/응답 실패 시. (호출한 쪽 crawlAndSave가 잡는다)
+     */
+    private Document fetchPage(String url) throws IOException {
+        return Jsoup.connect(url)
+                .userAgent("Mozilla/5.0 (PSB-Crawler)")
+                .timeout(10_000)
+                .get();
+    }
+
+    /**
+     * 같은 상세 URL의 책이 아직 없으면 저장한다. (중복 방지)
+     *
+     * @return 새로 저장했으면 true, 이미 있어서 건너뛰었으면 false
+     */
+    private boolean saveIfNew(Book book) {
+        if (bookRepository.existsByDetailUrl(book.getDetailUrl())) {
+            return false;
+        }
+        bookRepository.save(book);
+        return true;
+    }
+
+    /**
+     * 책 덩어리(HTML 조각) 하나에서 값들을 뽑아 Book 객체로 만든다.
+     *
+     *   ② [데이터 변환]  HTML Element  ───추출───>  자바 원시값  ───조립───>  Book
+     *      <article.product_pod>                 title, price...           new Book(...)
      *
      * @param product <article class="product_pod"> 한 개에 해당하는 HTML 조각
      * @return 값이 채워진 Book 객체
      */
     private Book parseBook(Element product) {
-        // 제목: <h3><a ... title="A Light in the Attic"> 의 title 속성 값.
-        //  - selectFirst(): 조건에 맞는 첫 번째 요소 1개를 찾음
-        //  - attr("title"): 그 요소의 title 속성 값을 읽음
-        //  - 목록의 보이는 글자는 "..."로 잘려있어, 잘리지 않은 title 속성을 쓴다.
-        String title = product.selectFirst("h3 a").attr("title");
+        // selectFirst(): 조건에 맞는 첫 요소 1개 / attr(): 속성값 / text(): 안쪽 글자
+        String title        = product.selectFirst(SEL_TITLE_LINK).attr("title");   // 안 잘린 전체 제목
+        double price        = parsePrice(product.selectFirst(SEL_PRICE).text());   // "£51.77" -> 51.77
+        int    rating       = parseRating(product);                                // "Three" -> 3
+        String availability = product.selectFirst(SEL_AVAILABILITY).text();        // 재고 텍스트
+        String detailUrl    = product.selectFirst(SEL_TITLE_LINK).absUrl("href");  // 상대->절대 URL
+        String imageUrl     = product.selectFirst(SEL_IMAGE).absUrl("src");        // 표지 이미지 URL
 
-        // 가격: <p class="price_color">£51.77</p> 의 글자.
-        //  - text(): 태그 안의 글자만 가져옴 -> "£51.77"
-        String priceText = product.selectFirst("p.price_color").text();
-        double price = parsePrice(priceText); // "£51.77" -> 51.77 숫자로 변환
-
-        // 별점: <p class="star-rating Three"> 의 class 에 들어있는 단어(Three 등).
-        int rating = parseRating(product);
-
-        // 재고: <p class="instock availability"> ... </p> 의 글자.
-        String availability = product.selectFirst("p.instock.availability").text();
-
-        // 상세 페이지 링크: <h3><a href="..."> 의 href.
-        //  - absUrl("href"): 상대주소(a-light.../index.html)를 절대주소(http://...)로 변환
-        String detailUrl = product.selectFirst("h3 a").absUrl("href");
-
-        // 표지 이미지: <div class="image_container"> 안의 <img src="..."> 의 src.
-        String imageUrl = product.selectFirst(".image_container img").absUrl("src");
-
-        // 뽑아낸 값들로 Book 객체를 만들어 돌려준다. (편의 생성자 사용)
         return new Book(title, price, rating, availability, detailUrl, imageUrl);
     }
 
@@ -155,48 +182,55 @@ public class BookCrawlerService {
      * "£51.77" 같은 가격 문자열에서 숫자만 뽑아 double로 변환한다.
      *
      * @param raw 원본 가격 문자열 (예: "£51.77")
-     * @return 숫자 가격 (예: 51.77)
+     * @return 숫자 가격 (예: 51.77), 숫자가 없으면 0.0
      */
     private double parsePrice(String raw) {
-        // 정규식으로 숫자(0-9)와 점(.)을 제외한 모든 문자를 빈 문자열로 지운다.
-        //  - "£51.77" -> "51.77"
+        // 정규식: 숫자(0-9)와 점(.)이 아닌 모든 문자를 지운다. "£51.77" -> "51.77"
         String numberOnly = raw.replaceAll("[^0-9.]", "");
         if (numberOnly.isEmpty()) {
-            return 0.0; // 혹시 숫자가 하나도 없으면 0으로 처리
+            return 0.0;
         }
-        // 문자열 "51.77" 을 진짜 숫자 51.77 로 바꾼다.
-        return Double.parseDouble(numberOnly);
+        return Double.parseDouble(numberOnly); // "51.77" -> 51.77
     }
 
     /**
      * 별점 단어를 숫자로 변환한다. (예: class="star-rating Three" -> 3)
+     *  - 기존 if-else 5번 사슬을 → RATING_WORDS 배열 + 반복문으로 축약.
+     *  - i번째 단어가 들어있으면 점수는 (i+1).
      *
      * @param product 책 덩어리 HTML 조각
-     * @return 1~5 사이의 별점. 알 수 없으면 0.
+     * @return 1~5 사이의 별점, 알 수 없으면 0
      */
     private int parseRating(Element product) {
-        // star-rating 이라는 class를 가진 <p> 태그를 찾는다.
-        Element starTag = product.selectFirst("p.star-rating");
+        Element starTag = product.selectFirst(SEL_STAR);
         if (starTag == null) {
             return 0;
         }
+        String classValue = starTag.className(); // 예: "star-rating Three"
 
-        // 그 태그의 class 속성 전체를 읽는다. (예: "star-rating Three")
-        String classValue = starTag.className();
-
-        // class 안에 어떤 단어가 들어있는지에 따라 숫자를 정한다.
-        //  - contains(): 특정 글자가 포함되어 있는지 검사 (true/false)
-        if (classValue.contains("One")) {
-            return 1;
-        } else if (classValue.contains("Two")) {
-            return 2;
-        } else if (classValue.contains("Three")) {
-            return 3;
-        } else if (classValue.contains("Four")) {
-            return 4;
-        } else if (classValue.contains("Five")) {
-            return 5;
+        for (int i = 0; i < RATING_WORDS.length; i++) {
+            if (classValue.contains(RATING_WORDS[i])) {
+                return i + 1; // 인덱스 0(One) -> 1점 ... 인덱스 4(Five) -> 5점
+            }
         }
-        return 0; // 위에 해당 없으면 0 (별점 정보 없음)
+        return 0; // 매칭 없음 (별점 정보 없음)
     }
+
+    // ========================================================================
+    // ④ [Stateless Safety Check]
+    //   - 멤버 변수는 bookRepository(불변 final 빈) 하나뿐 → 요청마다 값이 바뀌지 않음.
+    //   - savedCount, page, book 등 "처리 중 바뀌는 값"은 전부 메서드 안 지역변수
+    //     → 호출할 때마다 각 스레드의 Stack에 따로 생긴다(격리).
+    //   ⇒ 싱글톤 빈 1개를 여러 스레드가 동시에 호출해도 동시성 충돌이 없다.
+    //
+    //   [ Thread별 Stack (격리) ]            [ 공용 Heap (공유) ]
+    //   ┌─────────────────────────┐          ┌──────────────────────────┐
+    //   │ Thread-1: crawlAndSave()│ ──┐      │ BookCrawlerService (빈 1개)│
+    //   │  └ savedCount, book ... │   │      │  └ bookRepository (final) │
+    //   └─────────────────────────┘   ├────> │                          │
+    //   ┌─────────────────────────┐   │      │ BookRepository (빈 1개)   │
+    //   │ Thread-2: crawlAndSave()│ ──┘      │  : 싱글톤, 무상태          │
+    //   │  └ savedCount, book ... │          └──────────────────────────┘
+    //   └─────────────────────────┘
+    // ========================================================================
 }
