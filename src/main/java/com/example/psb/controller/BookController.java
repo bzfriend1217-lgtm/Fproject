@@ -13,10 +13,10 @@ import java.util.List;
 
 /*
  * ============================================================================
- *  BookController  ─ 웹 요청의 "최상단 입구(주문 받는 카운터)" 계층
+ *  BookController ─ 웹 요청의 "최상단 입구(주문 받는 카운터)" 계층
  * ============================================================================
  *
- * [① UML & 도킹 관계]  ─ Controller는 DB 생김새를 1도 모른다. URL→Service 연결만.
+ * [① UML & 도킹 관계]  ─ Controller는 DB 생김새를 1도 모른다. URL→Service 연결만 한다.
  *
  *   Client(브라우저)
  *      │  HTTP GET /api/books/...
@@ -62,10 +62,6 @@ import java.util.List;
  *                            "HTTP 응답 본문(JSON)"으로 본다.
  *   @RequestMapping("/api/books") = 이 안 모든 메서드 주소의 공통 접두어.
  *                            예) @GetMapping("/count") → 실제 주소 /api/books/count
- *
- * ----------------------------------------------------------------------------
- *  ⚠️ Active Recall: 아래 코드에 // TODO(빈칸N) 4개를 뚫어 두었습니다.
- *     채워야 컴파일됩니다. (정답이 필요하면 "정답키 알려줘"라고 요청하세요.)
  * ============================================================================
  */
 @RestController                  // 이 클래스 = 웹 컨트롤러 빈(리턴값을 JSON 본문으로)
@@ -91,21 +87,21 @@ public class BookController {
     }
 
     // [메커니즘] 개수: GET /api/books/count → SELECT count(*) → long 1개
-    // [퀴즈] findAll 처럼 JpaRepository가 공짜로 주는 기본 메서드다.
     @GetMapping("/count")
     public long getBookCount() {
-        return bookService./* TODO(빈칸4): 전체 개수를 세는 메서드명? (단서: SELECT count(*)) */();
+        return bookService.count();
     }
 
     // [메커니즘] 제목 검색: GET /api/books/search?keyword=Light → LIKE '%Light%'
-    // [퀴즈] keyword="Light" 라는 값은 어느 스레드의 무엇(Stack/Heap)에만 존재하나? ([②] 참고)
+    //   @RequestParam = ?키=값 형태의 "쿼리스트링" 값을 메서드 인자로 꺼내는 표식.
+    //                   (인자명 keyword 와 쿼리이름 keyword 가 같아 이름 생략 가능)
     @GetMapping("/search")
-    public List<Book> searchByTitle(/* TODO(빈칸1): ?keyword=.. 쿼리값을 꺼내는 애너테이션? */ String keyword) {
+    public List<Book> searchByTitle(@RequestParam String keyword) {
         return bookService.findByTitle(keyword);
     }
 
     // [메커니즘] 별점 필터: GET /api/books/rating?min=4 → 별점 4 이상
-    // ("min" 쿼리이름 ↔ minRating 자바변수명을 괄호로 짝지어 준다)
+    //   ("min" 쿼리이름 ↔ minRating 자바변수명을 괄호로 짝지어 준다)
     @GetMapping("/rating")
     public List<Book> getByRating(@RequestParam("min") int minRating) {
         return bookService.findByRating(minRating);
@@ -118,7 +114,7 @@ public class BookController {
     }
 
     // [메커니즘] 1권 조회: GET /api/books/3 ← 끝의 3이 경로상의 {id}
-    //   ?키=값(@RequestParam)과 달리, 경로 칸의 값은 다른 애너테이션으로 꺼낸다.
+    //   ?키=값(@RequestParam)과 달리, 경로 칸의 값은 @PathVariable 로 꺼낸다.
     //   ResponseEntity = 상태코드+본문을 통째로 직접 조립하는 상자(찾음/못찾음 분기용).
     //
     // [⑤ 예외 U-턴 맵] (이 메서드가 무대)
@@ -128,10 +124,10 @@ public class BookController {
     //     · DB 커넥션 고갈 등 진짜 예외 → Repo가 throw → Service 전파 → Controller 전파
     //                                  → 스프링이 가로채 500 + 에러 JSON 으로 U-턴
     @GetMapping("/{id}")
-    public ResponseEntity<Book> getBookById(/* TODO(빈칸2): 경로 {id} 칸의 값을 꺼내는 애너테이션? */ Long id) {
+    public ResponseEntity<Book> getBookById(@PathVariable Long id) {
         return bookService.findById(id)
-                .map(book -> ResponseEntity.ok(book))                       // 있으면 200 OK + 책
-                .orElseGet(() -> ResponseEntity./* TODO(빈칸3): 못 찾았을 때 상태코드 메서드? */().build()); // 없으면 404
+                .map(book -> ResponseEntity.ok(book))            // 있으면 200 OK + 책
+                .orElseGet(() -> ResponseEntity.notFound().build()); // 없으면 404
     }
 
     // ========================================================================

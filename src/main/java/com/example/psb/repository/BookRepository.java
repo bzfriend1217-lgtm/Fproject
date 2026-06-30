@@ -27,13 +27,13 @@ import java.util.Optional;
 // [JpaRepository<Book, Long> 제네릭 해독]
 //   JpaRepository< Book , Long >
 //                  ▲      ▲
-//                  │      └─ PK(@Id) 타입  ← Book.id 가 ____ 이므로 (TODO 맞히기)
+//                  │      └─ PK(@Id) 타입  ← Book.id 가 Long 이므로
 //                  └──────── 다루는 엔티티 타입
 //
 //   상속만으로 공짜로 생기는 기본 메서드(직접 구현 X):
 //     save / saveAll / findById / findAll / count / existsById / deleteById ...
 //
-@Repository // [퀴즈] 이 인터페이스가 "저장소 Bean"임을 표시. (JpaRepository 상속 시 생략 가능하나 명시)
+@Repository
 public interface BookRepository extends JpaRepository<Book, Long> {
 
     // ------------------------------------------------------------------------
@@ -46,17 +46,14 @@ public interface BookRepository extends JpaRepository<Book, Long> {
     // [중복 체크용] detail_url 로 1건 조회.
     //   SQL ▶ SELECT * FROM books WHERE detail_url = ?
     //   반환이 Optional 인 이유: 결과가 "없을 수도" 있음 → null 대신 빈 상자로 안전 처리.
-    // TODO(빈칸): 반환 타입은?  ________<Book> findByDetailUrl(String detailUrl);
     Optional<Book> findByDetailUrl(String detailUrl);
 
     // [저장 전 가드레일] 이미 있는 url 인가?  if (!repo.existsByDetailUrl(url)) save(...)
     //   SQL ▶ SELECT count(*) > 0 FROM books WHERE detail_url = ?
-    // TODO(이름 맞히기): "존재 여부"를 묻는 접두 키워드는?  ______ByDetailUrl(...)
     boolean existsByDetailUrl(String detailUrl);
 
     // [제목 검색] 키워드가 "포함된" 책 전체.
     //   SQL ▶ SELECT * FROM books WHERE title LIKE %?%
-    // TODO(키워드): LIKE %?% 로 바뀌는 꼬리 키워드는?  findByTitle__________(String keyword)
     List<Book> findByTitleContaining(String keyword);
 
     // [별점 필터] rating 이 기준값 이상(>=)인 책.
