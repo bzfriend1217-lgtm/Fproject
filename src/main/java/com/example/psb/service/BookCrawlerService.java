@@ -101,14 +101,14 @@ public class BookCrawlerService {
 
         for (int page = 1; page <= maxPages; page++) {
             String url = String.format(PAGE_URL, page);
-            System.out.println("[크롤링] 페이지 접속: " + url);
+            System.out.println("[Crawler] Fetching page: " + url);
 
             try {
                 Document doc = fetchPage(url);
                 Elements products = doc.select(SEL_PRODUCT);
 
                 if (products.isEmpty()) {
-                    System.out.println("[크롤링] 더 이상 책이 없어 종료합니다.");
+                    System.out.println("[Crawler] No more books found. Stopping.");
                     break;
                 }
 
@@ -120,11 +120,11 @@ public class BookCrawlerService {
 
             } catch (IOException e) {
                 // 네트워크 오류 → 이 페이지만 건너뛰고 for 문 계속.
-                System.out.println("[크롤링] 페이지 처리 실패: " + url + " (" + e.getMessage() + ")");
+                System.out.println("[Crawler] Failed to process page: " + url + " (" + e.getMessage() + ")");
             }
         }
 
-        System.out.println("[크롤링] 완료! 새로 저장한 책 수 = " + savedCount);
+        System.out.println("[Crawler] Done! Newly saved books = " + savedCount);
         return savedCount;
     }
 

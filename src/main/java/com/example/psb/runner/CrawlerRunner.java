@@ -69,25 +69,25 @@ public class CrawlerRunner implements CommandLineRunner {
     // ------------------------------------------------------------------------
     @Override
     public void run(String... args) throws Exception {
-        System.out.println("====== 크롤링 시작 ======");
+        System.out.println("====== Crawling started ======");
 
         // ① 크롤링 + 저장을 서비스에 위임하고, 새로 저장한 권수만 돌려받는다.
         int savedCount = crawlerService.crawlAndSave(DEFAULT_PAGES);
-        System.out.println("저장된 책 수: " + savedCount);
+        System.out.println("Saved books: " + savedCount);
 
         // ② 잘 저장됐는지 확인: DB에서 전체를 다시 꺼내 앞쪽 일부만 보여준다.
         List<Book> books = bookRepository.findAll();
-        System.out.println("현재 DB에 저장된 총 책 수: " + books.size());
+        System.out.println("Total books currently in DB: " + books.size());
 
         printPreview(books);
 
-        System.out.println("====== 크롤링 종료 ======");
-        System.out.println("H2 콘솔에서 확인: http://localhost:8080/h2-console");
+        System.out.println("====== Crawling finished ======");
+        System.out.println("Check with H2 console: http://localhost:8080/h2-console");
     }
 
     // PREVIEW_LIMIT 권만 콘솔에 출력. 책이 부족하면 있는 만큼만 출력.
     private void printPreview(List<Book> books) {
-        System.out.println("------ 앞쪽 " + PREVIEW_LIMIT + "권 미리보기 ------");
+        System.out.println("------ Preview of first " + PREVIEW_LIMIT + " books ------");
 
         int previewCount = Math.min(PREVIEW_LIMIT, books.size());
         for (int i = 0; i < previewCount; i++) {
