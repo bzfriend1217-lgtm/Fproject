@@ -7,6 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class PsbApplication {
 
     public static void main(String[] args) {
+        System.out.println(PsbApplication.class);
+
+
         SpringApplication.run(PsbApplication.class, args);
     }
 }
